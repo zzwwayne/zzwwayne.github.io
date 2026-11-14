@@ -1,170 +1,108 @@
-/**
- * script.js — Alex Chen Portfolio
- * Smooth scroll, mobile nav, scroll animations, active nav
- */
+"use strict";
 
-(function () {
-  'use strict';
+// 渐进增强：关闭 JavaScript 后，完整新闻和普通导航链接仍可使用。
+(() => {
+  const header = document.querySelector(".site-header");
+  const menuButton = document.querySelector(".menu-toggle");
+  const navigation = document.querySelector("#navigation-links");
+  const navLinks = [...document.querySelectorAll("[data-nav]")];
+  const sections = [...document.querySelectorAll("[data-section]")];
+  const mobile = window.matchMedia("(max-width: 640px)");
+  let framePending = false;
 
-  // ============================================
-  // DOM References
-  // ============================================
-
-  const nav = document.getElementById('nav');
-  const navToggle = document.getElementById('navToggle');
-  const navLinks = document.getElementById('navLinks');
-  const navLinkItems = document.querySelectorAll('.nav__link');
-  const sections = document.querySelectorAll('.section, .hero');
-
-  // ============================================
-  // Smooth Scrolling
-  // ============================================
-
-  document.querySelectorAll('a[href^="#"]').forEach(function (anchor) {
-    anchor.addEventListener('click', function (e) {
-      e.preventDefault();
-      var targetId = this.getAttribute('href');
-      var target = document.querySelector(targetId);
-
-      if (target) {
-        var offset = nav.offsetHeight;
-        var top = target.getBoundingClientRect().top + window.pageYOffset - offset;
-
-        window.scrollTo({ top: top, behavior: 'smooth' });
-
-        // Close mobile nav if open
-        closeMobileNav();
-      }
-    });
-  });
-
-  // ============================================
-  // Mobile Navigation Toggle
-  // ============================================
-
-  navToggle.addEventListener('click', function () {
-    var isOpen = navLinks.classList.contains('nav__links--open');
-
-    if (isOpen) {
-      closeMobileNav();
-    } else {
-      openMobileNav();
+  function measureHeader() {
+    if (header) {
+      document.documentElement.style.setProperty("--header-height", `${header.getBoundingClientRect().height}px`);
     }
-  });
-
-  function openMobileNav() {
-    navLinks.classList.add('nav__links--open');
-    navToggle.classList.add('nav__toggle--active');
-    navToggle.setAttribute('aria-expanded', 'true');
-    document.body.style.overflow = 'hidden';
   }
 
-  function closeMobileNav() {
-    navLinks.classList.remove('nav__links--open');
-    navToggle.classList.remove('nav__toggle--active');
-    navToggle.setAttribute('aria-expanded', 'false');
-    document.body.style.overflow = '';
+  // 以吸顶导航下方的阅读位置确定当前板块，避免短板块与长板块争夺高亮。
+  function updateActiveLink() {
+    framePending = false;
+    if (!sections.length) return;
+    const readingLine = (header ? header.getBoundingClientRect().height : 0) + 32;
+    let active = sections[0].dataset.section;
+    for (const section of sections) {
+      if (section.getBoundingClientRect().top <= readingLine) active = section.dataset.section;
+    }
+    // 页面末尾的 Contact 较短，无法总是滚动到顶部，故到达页底时显式选中。
+    if (window.scrollY > 0 && Math.ceil(window.scrollY + window.innerHeight) >= document.documentElement.scrollHeight - 2) {
+      active = sections[sections.length - 1].dataset.section;
+    }
+    for (const link of navLinks) {
+      if (link.dataset.nav === active) link.setAttribute("aria-current", "location");
+      else link.removeAttribute("aria-current");
+    }
   }
 
-  // Close mobile nav on resize to desktop
-  window.addEventListener('resize', function () {
-    if (window.innerWidth >= 768) {
-      closeMobileNav();
-    }
-  });
+  function scheduleUpdate() {
+    if (framePending) return;
+    framePending = true;
+    window.requestAnimationFrame(updateActiveLink);
+  }
 
-  // ============================================
-  // Nav Shadow on Scroll
-  // ============================================
+  function setMenu(open) {
+    if (!menuButton || !navigation) return;
+    menuButton.setAttribute("aria-expanded", String(open));
+    navigation.hidden = mobile.matches && !open;
+    measureHeader();
+    scheduleUpdate();
+  }
 
-  var scrollTimeout;
-
-  window.addEventListener('scroll', function () {
-    if (scrollTimeout) return;
-
-    scrollTimeout = requestAnimationFrame(function () {
-      if (window.scrollY > 10) {
-        nav.classList.add('nav--scrolled');
-      } else {
-        nav.classList.remove('nav--scrolled');
-      }
-      scrollTimeout = null;
+  if (header && menuButton && navigation) {
+    header.dataset.menuReady = "true";
+    const syncMenu = () => {
+      const focused = document.activeElement;
+      menuButton.hidden = !mobile.matches;
+      setMenu(false);
+      // 改变窗口宽度时，避免焦点停留在被隐藏的菜单项或按钮上。
+      if (mobile.matches && navigation.contains(focused)) menuButton.focus();
+      else if (!mobile.matches && focused === menuButton) navLinks[0]?.focus();
+    };
+    syncMenu();
+    mobile.addEventListener("change", syncMenu);
+    menuButton.addEventListener("click", () => setMenu(menuButton.getAttribute("aria-expanded") !== "true"));
+    header.addEventListener("click", (event) => {
+      const link = event.target.closest("a[href^='#']");
+      if (!link || !mobile.matches || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      setMenu(false);
+      // 保留原生锚点、URL 与浏览器历史；CSS 提供平滑滚动及 reduced-motion 支持。
+      const target = document.getElementById(link.getAttribute("href").slice(1));
+      target?.focus({ preventScroll: true });
     });
-  });
+    header.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && menuButton.getAttribute("aria-expanded") === "true") {
+        setMenu(false);
+        menuButton.focus();
+      }
+    });
+  }
 
-  // ============================================
-  // Active Nav Link Highlighting
-  // ============================================
-
-  var sectionObserver = new IntersectionObserver(
-    function (entries) {
-      entries.forEach(function (entry) {
-        if (entry.isIntersecting) {
-          var id = entry.target.getAttribute('id');
-
-          navLinkItems.forEach(function (link) {
-            link.classList.remove('nav__link--active');
-
-            if (link.getAttribute('href') === '#' + id) {
-              link.classList.add('nav__link--active');
-            }
-          });
-        }
+  const newsList = document.querySelector("#news-list");
+  const extraNews = document.querySelector("#news-extra");
+  const newsButton = document.querySelector(".news-toggle");
+  if (newsList && extraNews && newsButton) {
+    const olderItems = [...newsList.children].slice(3);
+    if (olderItems.length) {
+      extraNews.append(...olderItems);
+      newsButton.hidden = false;
+      newsButton.addEventListener("click", () => {
+        const expanded = newsButton.getAttribute("aria-expanded") === "true";
+        extraNews.hidden = expanded;
+        newsButton.setAttribute("aria-expanded", String(!expanded));
+        newsButton.textContent = expanded ? "Show more" : "Show less";
+        scheduleUpdate();
       });
-    },
-    {
-      rootMargin: '-40% 0px -55% 0px',
-      threshold: 0,
     }
-  );
-
-  sections.forEach(function (section) {
-    sectionObserver.observe(section);
-  });
-
-  // ============================================
-  // Scroll-based Fade-in Animations
-  // ============================================
-
-  function initFadeAnimations() {
-    // Add fade-in class to elements we want to animate
-    var animateTargets = document.querySelectorAll(
-      '.work__card, .about__content, .skills__group, .contact__text, .contact__email, .contact__socials'
-    );
-
-    animateTargets.forEach(function (el) {
-      el.classList.add('fade-in');
-    });
-
-    var fadeObserver = new IntersectionObserver(
-      function (entries) {
-        entries.forEach(function (entry) {
-          if (entry.isIntersecting) {
-            entry.target.classList.add('fade-in--visible');
-            fadeObserver.unobserve(entry.target);
-          }
-        });
-      },
-      {
-        rootMargin: '0px 0px -60px 0px',
-        threshold: 0.1,
-      }
-    );
-
-    document.querySelectorAll('.fade-in').forEach(function (el) {
-      fadeObserver.observe(el);
-    });
   }
 
-  // Stagger work cards for a cascading effect
-  function staggerWorkCards() {
-    var cards = document.querySelectorAll('.work__card.fade-in');
-    cards.forEach(function (card, index) {
-      card.style.transitionDelay = index * 0.1 + 's';
-    });
+  if (header && "ResizeObserver" in window) {
+    new ResizeObserver(() => { measureHeader(); scheduleUpdate(); }).observe(header);
   }
-
-  initFadeAnimations();
-  staggerWorkCards();
-
+  window.addEventListener("scroll", scheduleUpdate, { passive: true });
+  window.addEventListener("resize", () => { measureHeader(); scheduleUpdate(); });
+  window.addEventListener("load", scheduleUpdate);
+  window.addEventListener("hashchange", scheduleUpdate);
+  measureHeader();
+  updateActiveLink();
 })();
